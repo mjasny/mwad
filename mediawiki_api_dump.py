@@ -21,7 +21,7 @@ def get_pages(apfrom=None):
         })
     return requests.get('https://wiki.archlinux.org/api.php', params=params).json()
 
-def get_all_pages(cache=True):
+def get_all_pages(cache=False, save_cache=False):
     if cache:
         with open('pages.json') as f:
             return json.load(f)
@@ -35,8 +35,9 @@ def get_all_pages(cache=True):
             break
         apfrom = result['continue']['apcontinue']
 
-    with open('pages.json', 'w') as f:
-        json.dump(pages, f)
+    if save_cache:
+        with open('pages.json', 'w') as f:
+            json.dump(pages, f)
 
     return pages
 
