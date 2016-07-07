@@ -1,96 +1,144 @@
 #!/usr/bin/env python3
-#coding: *-*utf-8*-*
+#-*-coding:utf-8-*-
 
-
+import argparse
+import logging
+import urllib.parse
 import requests
 import json
-import xml.etree.ElementTree as ET
+import re
 
-def get_pages(apfrom=None):
-    params = {
-        'action': 'query',
-        'list': 'allpages',
-        'aplimit': 500,
-        'continue': '',
-        'format': 'json',
-        #'apfilterredir': 'nonredirects'
-    }
-    if apfrom:
-        params.update({
-            'apfrom': apfrom
-        })
-    return requests.get('https://wiki.archlinux.org/api.php', params=params).json()
+parser = argparse.ArgumentParser(
+    description = 'Create a wiki xml-dump via api.php'
+)
 
-def get_all_pages(cache=False, save_cache=False):
-    if cache:
-        with open('pages.json') as f:
-            return json.load(f)
+parser.add_argument('-v', '--verbose', action='count', default=0, help='verbose level... repeat up to three times\n')
+parser.add_argument('-n', '--name', help='name of the wiki for filename etc.\n')
+parser.add_argument('-l', '--log', help='specify log-file.\n')
+parser.add_argument('wiki_url', metavar='url', help='download url\n') #nargs='+',
 
-    apfrom = None
-    pages = []
-    while True:
-        result = get_pages(apfrom)
-        pages.extend(result['query']['allpages'])
-        if 'continue' not in result:
-            break
-        apfrom = result['continue']['apcontinue']
+args = parser.parse_args()
 
-    if save_cache:
-        with open('pages.json', 'w') as f:
-            json.dump(pages, f)
+logFormatter = logging.Formatter('%(asctime)s - %(message)s')
+rootLogger = logging.getLogger()
+rootLogger.setLevel(logging.INFO)
 
-    return pages
+if args.log:
+    fileHandler = logging.FileHandler(args.log)
+    fileHandler.setFormatter(logFormatter)
+    rootLogger.addHandler(fileHandler)
 
+consoleHandler = logging.StreamHandler()
+consoleHandler.setLevel(max(3 - args.verbose, 0) * 10)
+consoleHandler.setFormatter(logFormatter)
+rootLogger.addHandler(consoleHandler)
+logging.getLogger('requests').setLevel(logging.CRITICAL)
 
-def split(arr, size):
-     arrs = []
-     while len(arr) > size:
-         pice = arr[:size]
-         arrs.append(pice)
-         arr   = arr[size:]
-     arrs.append(arr)
-     return arrs
-
-#limit 50
-def get_page_by_id(pageids=[]):
-    params = {
-        'action': 'query',
-        'pageids': '|'.join([str(x) for x in pageids]),
-        'continue': '',
-        'export': '',
-        'exportnowrap': ''
-    }
-    return requests.get('https://wiki.archlinux.org/api.php', params=params).text
-
-def merge_pages(pageids=[]):
-    if not pageids:
-        return
-
-
-    base = ET.fromstring(get_page_by_id())
-    ET.register_namespace('','http://www.mediawiki.org/xml/export-0.10/') #read out
-    ns = base.tag[:base.tag.index('}')+1]
-
-
-    for ids in split(pageids, 50):
-        print(ids)
-
-        root = ET.fromstring(get_page_by_id(ids))
-        base.extend(root.iter(ns + 'page'))
-
-    tree = ET.ElementTree(base)
-    tree.write('articles_merged.xml', encoding='utf-8')
-
-    #print(ET.tostring(root, encoding='utf-8').decode('utf-8'))
+logging.info('Arguments: %s', str(vars(args)))
 
 
 
-def main():
-    pages = get_all_pages()
+class Dumper():
+    def __init__(self, wiki, api):
+        self.wiki = wiki
+        self.api = api
+        self.writer = None
+        self.pages_per_request = 50
 
-    merge_pages([x['pageid'] for x in pages]) #50
+    def start(self):
+        pageids = self.get_pageids()
+        self.merge_pages(pageids)
+        logging.info('Done')
 
-    #fix identation with: sed -i -e 's/^<page>/  <page>/g' articles_merged.xml
+
+    def xml_writer(self, filename):
+        with open(filename, 'w') as f:
+            try:
+                while True:
+                    line = (yield)
+                    f.write(line)
+            except GeneratorExit:
+                logging.info('File: %s done.', filename)
+                pass
+
+    def merge_pages(self, pageids=[]):
+        if not pageids:
+            return
+
+        self.writer = self.xml_writer('{0}-pages-articles.xml'.format(self.wiki))
+        next(self.writer)
+
+        page = self.mw_export_pageids()
+
+        self.writer.send(re.search('(<mediawiki.*>)', page).group(0))
+        self.writer.send(re.search('(\s*?<siteinfo>.*?<\/siteinfo>)', page, re.DOTALL).group(0))
+
+        for ids in self.__split_list(pageids, self.pages_per_request):
+            logging.info('Current ids: %s', str(ids))
+            page = self.mw_export_pageids(ids)
+            for page in re.finditer('(\s*?<page>.*?<\/page>)', page, re.DOTALL):
+                self.writer.send(page.group(0))
+
+        self.writer.send('\n</mediawiki>\n')
+        self.writer.close()
+
+
+    def mw_export_pageids(self, pageids=[]):
+        params = {
+            'action': 'query',
+            'pageids': '|'.join([str(x) for x in pageids]),
+            'continue': '',
+            'export': '',
+            'exportnowrap': ''
+        }
+        r = requests.get(self.api, params=params)
+        logging.info('API: %s', r.url)
+        return r.text
+
+    def mw_list_allpages(self, apfrom=None):
+        params = {
+            'action': 'query',
+            'list': 'allpages',
+            'aplimit': 500,
+            'continue': '',
+            'format': 'json',
+            #'apfilterredir': 'nonredirects'
+        }
+        if apfrom:
+            params.update({
+                'apfrom': apfrom
+            })
+        r = requests.get(self.api, params=params)
+        logging.info('API: %s', r.url)
+        return r.json()
+
+    def get_pageids(self):
+        apfrom = None
+        pageids = []
+        while True:
+            result = self.mw_list_allpages(apfrom)
+            pageids.extend([x['pageid'] for x in result['query']['allpages']])
+            if 'continue' not in result:
+                break
+            apfrom = result['continue']['apcontinue']
+        logging.info('PageIds: %s', str(pageids))
+        return pageids
+
+    def __split_list(self, l, n):
+         arrs = []
+         while len(l) > n:
+             sl = l[:n]
+             arrs.append(sl)
+             l = l[n:]
+         arrs.append(l)
+         return arrs
+
 
 if __name__ == '__main__':
-    main()
+    API_URL = urllib.parse.urljoin(args.wiki_url, 'api.php')
+    WIKI_NAME = args.name or urllib.parse.urlparse(args.wiki_url).netloc
+
+    dumper = Dumper(WIKI_NAME, API_URL)
+    dumper.start()
+    #main()
+    #test()

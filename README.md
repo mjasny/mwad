@@ -1,4 +1,4 @@
-# mwad - mediawiki api 
+# mwad - mediawiki api
 
 
 This is a script for creating xml-dumps via the mediawiki api.
@@ -7,15 +7,27 @@ It is still in early development, feel free to a new [issues](https://github.com
 Importing to @gnosygnu's offline wikipedia-reader [XOWA](https://github.com/gnosygnu/xowa) works, but some layouts/templates seem to be missing.
 
 ## Installation
-#### Ubuntu
-    sudo apt-get install python3-lxml
-#### Archlinux
-    sudo pacman -S python-lxml
-
-You can install the `lxml` dependency via `python-pip` too.
+No additional packages are required at the moment :)
 
 ---
 
 
 ## Run
-    ./mediawiki_api_dump.py [args]
+```
+usage: mediawiki_api_dump.py [-h] [-v] [-n NAME] [-l LOG] url
+
+Create a wiki xml-dump via api.php
+
+positional arguments:
+url                   download url
+
+optional arguments:
+-h, --help            show this help message and exit
+-v, --verbose         verbose level... repeat up to three times
+-n NAME, --name NAME  name of the wiki for filename etc.
+-l LOG, --log LOG     specify log-file.
+```
+
+
+Example:
+    ./mediawiki_api_dump.py http://wiki.archlinux.org
