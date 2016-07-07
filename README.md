@@ -30,4 +30,5 @@ optional arguments:
 
 
 Example:
+
     ./mediawiki_api_dump.py http://wiki.archlinux.org
