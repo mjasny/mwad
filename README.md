@@ -4,7 +4,7 @@
 This is a script for creating xml-dumps via the mediawiki api.
 It is still in early development, feel free to a new [issues](https://github.com/Mattze96/mwad/issues).
 
-Importing to @gnosygnu's offline wikipedia-reader [XOWA](https://github.com/gnosygnu/xowa) works, but some layouts/templates seem to be missing.
+Importing to @gnosygnu's offline wikipedia-reader [XOWA](https://github.com/gnosygnu/xowa) works fine..
 
 ## Installation
 No additional packages are required at the moment :)
