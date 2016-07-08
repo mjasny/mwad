@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 #-*-coding:utf-8-*-
 
+'''mediawiki_api_dump.py: Creates a xml dump of all pages from the given wiki-url'''
+
+__author__      = 'https://github.com/Mattze96'
+__copyright__   = 'Copyright 2016, Planet Earth'
+
 import argparse
 import logging
 import urllib.parse
