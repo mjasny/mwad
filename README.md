@@ -26,6 +26,7 @@ optional arguments:
 -v, --verbose         verbose level... repeat up to three times
 -n NAME, --name NAME  name of the wiki for filename etc.
 -l LOG, --log LOG     specify log-file.
+-c, --compress        compress output file with bz2
 ```
 
 

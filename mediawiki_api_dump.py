@@ -12,6 +12,9 @@ import urllib.parse
 import requests
 import json
 import re
+import time
+import sys
+import bz2
 
 parser = argparse.ArgumentParser(
     description = 'Create a wiki xml-dump via api.php'
@@ -20,6 +23,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-v', '--verbose', action='count', default=0, help='verbose level... repeat up to three times\n')
 parser.add_argument('-n', '--name', help='name of the wiki for filename etc.\n')
 parser.add_argument('-l', '--log', help='specify log-file.\n')
+parser.add_argument('-c', '--compress', action='store_true', help='compress output file with bz2')
 parser.add_argument('wiki_url', metavar='url', help='download url\n') #nargs='+',
 
 args = parser.parse_args()
@@ -44,9 +48,10 @@ logging.info('Arguments: %s', str(vars(args)))
 
 
 class Dumper():
-    def __init__(self, wiki, api):
+    def __init__(self, wiki, api, compress):
         self.wiki = wiki
         self.api = api
+        self.compress = compress
         self.writer = None
         self.pages_per_request = 50
 
@@ -62,20 +67,30 @@ class Dumper():
         return [x['id'] for x in nss.values() if x['id'] >= 0]
 
     def xml_writer(self, filename):
-        with open(filename, 'w') as f:
-            try:
-                while True:
-                    line = (yield)
-                    f.write(line)
-            except GeneratorExit:
-                logging.info('File: %s done.', filename)
-                pass
+        if self.compress:
+            with bz2.open(filename+'.bz2', 'w') as f:
+                try:
+                    while True:
+                        line = (yield)
+                        f.write(line.encode('utf-8'))
+                except GeneratorExit:
+                    pass
+            logging.info('File: %s.bz2 done.', filename)
+        else:
+            with open(filename, 'w') as f:
+                try:
+                    while True:
+                        line = (yield)
+                        f.write(line)
+                except GeneratorExit:
+                    pass
+            logging.info('File: %s done.', filename)
 
     def merge_pages(self, pageids=[]):
         if not pageids:
             return
 
-        self.writer = self.xml_writer('{0}-pages-articles.xml'.format(self.wiki))
+        self.writer = self.xml_writer('{0}-{1}-pages-articles.xml'.format(self.wiki, time.strftime('%Y%m%d')))
         next(self.writer)
 
         page = self.mw_export_pageids()
@@ -159,8 +174,9 @@ class Dumper():
 if __name__ == '__main__':
     API_URL = urllib.parse.urljoin(args.wiki_url, 'api.php')
     WIKI_NAME = args.name or urllib.parse.urlparse(args.wiki_url).netloc
+    COMPRESS = args.compress
 
-    dumper = Dumper(WIKI_NAME, API_URL)
+    dumper = Dumper(WIKI_NAME, API_URL, COMPRESS)
     dumper.start()
     #main()
     #test()
