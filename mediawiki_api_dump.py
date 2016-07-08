@@ -45,19 +45,58 @@ logging.getLogger('requests').setLevel(logging.CRITICAL)
 
 logging.info('Arguments: %s', str(vars(args)))
 
+class ProgressBar(object):
+    def __init__(self, total, width=40, symbol='#', output=sys.stderr):
+        assert len(symbol) == 1
 
+        self.total = total
+        self.width = width
+        self.symbol = symbol
+        self.output = output
+        self.fmt = re.sub(r'(?P<name>%\(.+?\))d', r'\g<name>%dd' % len(str(total)),
+            '%(bar)s %(current)d/%(total)d (%(percent)3d%%)')
+
+        self.current = 0
+
+    def __call__(self):
+        percent = self.current / float(self.total)
+        size = int(self.width * percent)
+        remaining = self.total - self.current
+        bar = '[' + self.symbol * size + ' ' * (self.width - size) + ']'
+
+        args = {
+            'total': self.total,
+            'bar': bar,
+            'current': self.current,
+            'percent': percent * 100,
+            'remaining': remaining
+        }
+        print('\r' + self.fmt % args, file=self.output, end='')
+
+    def done(self):
+        self.current = self.total
+        self()
+        print('', file=self.output)
 
 class Dumper():
-    def __init__(self, wiki, api, compress):
+    def __init__(self, wiki, api, compress, enable_progress):
         self.wiki = wiki
         self.api = api
         self.compress = compress
+        self.enable_progress = enable_progress
         self.writer = None
         self.pages_per_request = 50
 
     def start(self):
+        if self.enable_progress:
+            print('Getting a list of all pages...')
         nss = self.get_nsids()
         pageids = self.get_pageids(nss)
+
+        if self.enable_progress:
+            print('Downloading pages...')
+            self.progress = ProgressBar(len(pageids))
+
         self.merge_pages(pageids)
         logging.info('Done')
 
@@ -101,11 +140,21 @@ class Dumper():
         for ids in self.__split_list(pageids, self.pages_per_request):
             logging.info('Current ids: %s', str(ids))
             page = self.mw_export_pageids(ids)
+            sub_pages = 0
             for page in re.finditer('(\s*?<page>.*?<\/page>)', page, re.DOTALL):
                 self.writer.send(page.group(0))
+                sub_pages += 1
+
+            if self.enable_progress:
+                self.progress.current += sub_pages
+                self.progress()
 
         self.writer.send('\n</mediawiki>\n')
         self.writer.close()
+
+        if self.enable_progress:
+            self.progress.done()
+            self.progress = None
 
     def mw_export_pageids(self, pageids=[]):
         params = {
@@ -175,8 +224,7 @@ if __name__ == '__main__':
     API_URL = urllib.parse.urljoin(args.wiki_url, 'api.php')
     WIKI_NAME = args.name or urllib.parse.urlparse(args.wiki_url).netloc
     COMPRESS = args.compress
+    ENABLE_PROGRESS = (args.verbose == 0)
 
-    dumper = Dumper(WIKI_NAME, API_URL, COMPRESS)
+    dumper = Dumper(WIKI_NAME, API_URL, COMPRESS, ENABLE_PROGRESS)
     dumper.start()
-    #main()
-    #test()
