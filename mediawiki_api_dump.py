@@ -46,10 +46,15 @@ class Dumper():
         self.pages_per_request = 50
 
     def start(self):
-        pageids = self.get_pageids()
+        nss = self.get_nsids()
+        pageids = self.get_pageids(nss)
         self.merge_pages(pageids)
         logging.info('Done')
 
+    def get_nsids(self):
+        nss = self.mw_siteinfo_namespaces()['query']['namespaces']
+        #Why not negative ??
+        return [x['id'] for x in nss.values() if x['id'] >= 0]
 
     def xml_writer(self, filename):
         with open(filename, 'w') as f:
@@ -82,7 +87,6 @@ class Dumper():
         self.writer.send('\n</mediawiki>\n')
         self.writer.close()
 
-
     def mw_export_pageids(self, pageids=[]):
         params = {
             'action': 'query',
@@ -95,14 +99,14 @@ class Dumper():
         logging.info('API: %s', r.url)
         return r.text
 
-    def mw_list_allpages(self, apfrom=None):
+    def mw_list_allpages(self, apfrom=None, ns=0):
         params = {
             'action': 'query',
             'list': 'allpages',
             'aplimit': 500,
             'continue': '',
             'format': 'json',
-            #'apfilterredir': 'nonredirects'
+            'apnamespace': ns
         }
         if apfrom:
             params.update({
@@ -112,15 +116,28 @@ class Dumper():
         logging.info('API: %s', r.url)
         return r.json()
 
-    def get_pageids(self):
-        apfrom = None
+    def mw_siteinfo_namespaces(self):
+            params = {
+                'action': 'query',
+                'meta': 'siteinfo',
+                'siprop': 'namespaces',
+                'format': 'json',
+            }
+            r = requests.get(self.api, params=params)
+            logging.info('API: %s', r.url)
+            return r.json()
+
+    def get_pageids(self, nss=[0]):
         pageids = []
-        while True:
-            result = self.mw_list_allpages(apfrom)
-            pageids.extend([x['pageid'] for x in result['query']['allpages']])
-            if 'continue' not in result:
-                break
-            apfrom = result['continue']['apcontinue']
+        for ns in nss:
+            apfrom = None
+            while True:
+                result = self.mw_list_allpages(apfrom, ns)
+                pageids.extend([x['pageid'] for x in result['query']['allpages']])
+                if 'continue' not in result:
+                    break
+                apfrom = result['continue']['apcontinue']
+        pageids.sort()
         logging.info('PageIds: %s', str(pageids))
         return pageids
 

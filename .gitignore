@@ -1,7 +1,7 @@
 # Generated files
-*.xml
 *.log
-
+dumps/*
+xowa/*
 
 
 # Byte-compiled / optimized / DLL files
