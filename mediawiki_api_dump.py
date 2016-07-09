@@ -5,11 +5,11 @@
 
 __author__      = 'https://github.com/Mattze96'
 __copyright__   = 'Copyright 2016, Planet Earth'
+__version__ = '0.0.1'
 
 import argparse
 import logging
-import urllib.parse
-import requests
+import urllib.parse, urllib.request
 import json
 import re
 import time
@@ -41,7 +41,6 @@ consoleHandler = logging.StreamHandler()
 consoleHandler.setLevel(max(3 - args.verbose, 0) * 10)
 consoleHandler.setFormatter(logFormatter)
 rootLogger.addHandler(consoleHandler)
-logging.getLogger('requests').setLevel(logging.CRITICAL)
 
 logging.info('Arguments: %s', str(vars(args)))
 
@@ -88,8 +87,11 @@ class Dumper():
         self.pages_per_request = 50
 
     def start(self):
+        statistics = self.get_statistics()
         if self.enable_progress:
             print('Getting a list of all pages...')
+            self.progress = ProgressBar(statistics['pages'])
+
         nss = self.get_nsids()
         pageids = self.get_pageids(nss)
 
@@ -104,6 +106,15 @@ class Dumper():
         nss = self.mw_siteinfo_namespaces()['query']['namespaces']
         #Why not negative ??
         return [x['id'] for x in nss.values() if x['id'] >= 0]
+
+    def get_statistics(self):
+        params = {
+            'action': 'query',
+            'meta': 'siteinfo',
+            'siprop': 'statistics',
+            'format': 'json',
+        }
+        return self.mw_api_json(params)['query']['statistics']
 
     def xml_writer(self, filename):
         if self.compress:
@@ -164,9 +175,19 @@ class Dumper():
             'export': '',
             'exportnowrap': ''
         }
-        r = requests.get(self.api, params=params)
-        logging.info('API: %s', r.url)
-        return r.text
+        return self.mw_api_text(params)
+
+    def mw_api_text(self, params):
+        data = urllib.parse.urlencode(params)
+        response = urllib.request.urlopen('{}?{}'.format(self.api, data))
+        logging.info('API: %s', response.geturl())
+        return response.read().decode('utf-8')
+
+    def mw_api_json(self, params):
+        data = urllib.parse.urlencode(params)
+        response = urllib.request.urlopen('{}?{}'.format(self.api, data))
+        logging.info('API: %s', response.geturl())
+        return json.loads(response.read().decode('utf-8'))
 
     def mw_list_allpages(self, apfrom=None, ns=0):
         params = {
@@ -181,20 +202,18 @@ class Dumper():
             params.update({
                 'apfrom': apfrom
             })
-        r = requests.get(self.api, params=params)
-        logging.info('API: %s', r.url)
-        return r.json()
+        return self.mw_api_json(params)
+
 
     def mw_siteinfo_namespaces(self):
-            params = {
-                'action': 'query',
-                'meta': 'siteinfo',
-                'siprop': 'namespaces',
-                'format': 'json',
-            }
-            r = requests.get(self.api, params=params)
-            logging.info('API: %s', r.url)
-            return r.json()
+        params = {
+            'action': 'query',
+            'meta': 'siteinfo',
+            'siprop': 'namespaces',
+            'format': 'json',
+        }
+        return self.mw_api_json(params)
+
 
     def get_pageids(self, nss=[0]):
         pageids = []
@@ -203,11 +222,19 @@ class Dumper():
             while True:
                 result = self.mw_list_allpages(apfrom, ns)
                 pageids.extend([x['pageid'] for x in result['query']['allpages']])
+                if self.enable_progress:
+                    self.progress.current += len(result['query']['allpages'])
+                    self.progress()
                 if 'continue' not in result:
                     break
                 apfrom = result['continue']['apcontinue']
         pageids.sort()
         logging.info('PageIds: %s', str(pageids))
+
+        if self.enable_progress:
+            self.progress.done()
+            self.progress = None
+
         return pageids
 
     def __split_list(self, l, n):
