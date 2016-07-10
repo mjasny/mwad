@@ -127,7 +127,7 @@ class Dumper():
                     pass
             logging.info('File: %s.bz2 done.', filename)
         else:
-            with open(filename, 'w') as f:
+            with open(filename, 'w', encoding='utf-8') as f:
                 try:
                     while True:
                         line = (yield)
