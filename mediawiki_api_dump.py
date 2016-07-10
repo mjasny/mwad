@@ -23,7 +23,8 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-v', '--verbose', action='count', default=0, help='verbose level... repeat up to three times\n')
 parser.add_argument('-n', '--name', help='name of the wiki for filename etc.\n')
 parser.add_argument('-l', '--log', help='specify log-file.\n')
-parser.add_argument('-c', '--compress', action='store_true', help='compress output file with bz2')
+parser.add_argument('-c', '--compress', action='store_true', help='compress output file with bz2\n')
+parser.add_argument('-x', '--xowa', action='store_true', help='special XOWA mode: xml to stdout, progress to stderr')
 parser.add_argument('wiki_url', metavar='url', help='download url\n') #nargs='+',
 
 args = parser.parse_args()
@@ -36,6 +37,9 @@ if args.log:
     fileHandler = logging.FileHandler(args.log)
     fileHandler.setFormatter(logFormatter)
     rootLogger.addHandler(fileHandler)
+
+if args.xowa:
+    args.verbose = 0
 
 consoleHandler = logging.StreamHandler()
 consoleHandler.setLevel(max(3 - args.verbose, 0) * 10)
@@ -78,28 +82,49 @@ class ProgressBar(object):
         print('', file=self.output)
 
 class Dumper():
-    def __init__(self, wiki, api, compress, enable_progress):
+    def __init__(self, wiki, api, compress, enable_progress, xowa_mode):
         self.wiki = wiki
         self.api = api
         self.compress = compress
         self.enable_progress = enable_progress
         self.writer = None
         self.pages_per_request = 50
+        self.xowa = xowa_mode
+        self.xowa_counter = 0
+        self.xowa_max_counter = 0
+
+    def xowa_status(self, *args, **kwargs):
+        if not self.xowa:
+            return
+        print('[mwad]:', *args, file=sys.stderr, **kwargs)
 
     def start(self):
+        self.xowa_status('getting statistics')
         statistics = self.get_statistics()
+        self.xowa_status('got statistics')
+
         if self.enable_progress:
-            print('Getting a list of all pages...')
+            print('Getting a list of all pages')
             self.progress = ProgressBar(statistics['pages'])
 
+        self.xowa_status('getting namespaces')
         nss = self.get_nsids()
+        self.xowa_status('got namespaces')
+        self.xowa_status('getting pageids')
+        self.xowa_counter = 0
+        self.xowa_max_counter = statistics['pages']
         pageids = self.get_pageids(nss)
+        self.xowa_status('got pageids')
 
         if self.enable_progress:
             print('Downloading pages...')
             self.progress = ProgressBar(len(pageids))
 
+        self.xowa_status('starting xml-stream')
+        self.xowa_counter = 0
+        self.xowa_max_counter = len(pageids)
         self.merge_pages(pageids)
+        self.xowa_status('stopped xml-stream')
         logging.info('Done')
 
     def get_nsids(self):
@@ -117,7 +142,16 @@ class Dumper():
         return self.mw_api_json(params)['query']['statistics']
 
     def xml_writer(self, filename):
-        if self.compress:
+        if self.xowa:
+            try:
+                while True:
+                    line = (yield)
+                    #f.write(line.encode('utf-8'))
+                    print(line, end='')
+            except GeneratorExit:
+                pass
+            logging.info('XML-Stream: %s done.', filename)
+        elif self.compress:
             with bz2.open(filename+'.bz2', 'w') as f:
                 try:
                     while True:
@@ -159,6 +193,9 @@ class Dumper():
             if self.enable_progress:
                 self.progress.current += sub_pages
                 self.progress()
+            self.xowa_counter += sub_pages
+            self.xowa_status('getting pageids', '{}/{}'.format(self.xowa_counter, self.xowa_max_counter))
+
 
         self.writer.send('\n</mediawiki>\n')
         self.writer.close()
@@ -225,6 +262,8 @@ class Dumper():
                 if self.enable_progress:
                     self.progress.current += len(result['query']['allpages'])
                     self.progress()
+                self.xowa_counter += len(result['query']['allpages'])
+                self.xowa_status('getting pageids', '{}/{}'.format(self.xowa_counter, self.xowa_max_counter))
                 if 'continue' not in result:
                     break
                 apfrom = result['continue']['apcontinue']
@@ -250,8 +289,9 @@ class Dumper():
 if __name__ == '__main__':
     API_URL = urllib.parse.urljoin(args.wiki_url, 'api.php')
     WIKI_NAME = args.name or urllib.parse.urlparse(args.wiki_url).netloc
-    COMPRESS = args.compress
-    ENABLE_PROGRESS = (args.verbose == 0)
+    COMPRESS = (args.compress and not args.xowa)
+    ENABLE_PROGRESS = (args.verbose == 0 and not args.xowa)
+    XOWA_MODE = args.xowa
 
-    dumper = Dumper(WIKI_NAME, API_URL, COMPRESS, ENABLE_PROGRESS)
+    dumper = Dumper(WIKI_NAME, API_URL, COMPRESS, ENABLE_PROGRESS, XOWA_MODE)
     dumper.start()
